@@ -37,9 +37,107 @@ a.console = (function() {
     var logData = {error: [], info: [], log: [], warn: []};
 
     /**
-     * Output to console and store given message. If console is not ready,
-	 * the content will be stored into object, the list function allow to
-	 * access stored content in this case.
+     * Determine if current level is significant compared to the "verbosity"
+     * defined by the enviromnent.
+     *
+     * @method isToBeLogged
+     * @private
+     *
+     * @param level {String} The log level, like "log", "warn", "info", "error", inspired from window.console levels.
+     *
+     * @ return True if message should be logged, false otherwise.
+     */
+    function isToBeLogged(level) {
+        // If no console, or log level, we allow all
+        switch (a.environment.get('console')) {
+        case 'error':
+            if (level !== 'error') {
+                return false;
+            }
+            /* falls through */
+        case 'warning':
+            /* falls through */
+        case 'warn':
+            if (level !== 'warn' && level !== 'error') {
+                return false;
+            }
+            /* falls through */
+        case 'info':
+            if (level === 'log') {
+                return false;
+            }
+            /* falls through */
+        default:
+            break;
+        }
+        return true;
+    }
+
+    /**
+     * @return The verbosity defined by environment. If not defined, return 0.
+    */
+    function getEnvironmentVerbosity() {
+        var environmentPriority = a.environment.get('verbose');
+        if (!a.isNull(environmentPriority)) {
+            return parseInt(environmentPriority, 10);
+        }
+        return 0;
+    }
+
+    /**
+     * Print a message to console if it matches level and priority defined
+     * by the environment.
+     * Print the message only if:
+     * 1/ Message level is high enough compared to environment configuration
+     * 2/ verbosity is high enough compared to environment configuration
+     *
+     * @method printToConsole
+     * @private
+     *
+     * @param level {String} The log level, like "log", "warn", "info", "error", inspired from window.console levels.
+     * @param message {Mixed} The message to output
+     * @param priority {Integer | null} Indicate the message priority level, can be null
+     *
+    */
+    function printToConsole(message, level, priority) {
+        var shouldPrint = isToBeLogged(level),
+            found = false;
+
+        // We search for fine verbose element
+        if (a.isString(message) && message.indexOf(':') >= 0) {
+            var name = message.substr(0, message.indexOf(':')),
+                namespaceList = name.split('.'),
+                i = namespaceList.length;
+
+            // We go from full array recomposed, to only first item
+            while (i--) {
+                var key = 'verbose-' + namespaceList.join('.'),
+                    en = a.environment.get(key);
+
+                if (!a.isNull(en)) {
+                    found = true;
+                    shouldPrint = (en < priority) ? false : true;
+                    break;
+                }
+
+                // We don't find any, we go one level up
+                namespaceList.pop();
+            }
+        }
+
+        if (!found && !a.isNull(priority) && priority < getEnvironmentVerbosity()) {
+            shouldPrint = false;
+        }
+
+        if (shouldPrint) {
+            window.console[level](message);
+        }
+    }
+
+    /**
+     * Output to console if possible and store given message.
+     * the content will be stored into object, the list function allow to
+     * access stored content in this case.
      *
      * @method log
      * @private
@@ -50,7 +148,7 @@ a.console = (function() {
      * @param appear {Boolean | null} Indicate if the console should handle or not the message (mostly used for unit test...)
     */
     function log(level, message, priority, appear) {
-        // Rollback to log in case of problem
+        // Rollback to log in case of problem (level parameter being incorrect)
         if (!a.isArray(logData[level])) {
             level = 'log';
         }
@@ -58,59 +156,7 @@ a.console = (function() {
 
         // Bug: IE does not support testing variable existence if they are not scopped with the root (here window)
         if (!a.isNull(window.console) && a.isFunction(window.console.log) && appear !== false) {
-            // We disable log depending of console level.
-            // If no console, or log level, we allow all
-            switch (a.environment.get('console')) {
-            case 'error':
-                if (level !== 'error') {
-                    break;
-                }
-            case 'warning':
-            case 'warn':
-                if (level !== 'warn' && level !== 'error') {
-                    break;
-                }
-            case 'info':
-                if (level === 'log') {
-                    break;
-                }
-            default:
-                var shouldPrint = true,
-                    found = false;
-
-                // We search for fine verbose element
-                if (a.isString(message) && message.indexOf(':') >= 0) {
-                    var name = message.substr(0, message.indexOf(':')),
-                        namespaceList = name.split('.'),
-                        i = namespaceList.length;
-
-                    // We go from full array recomposed, to only first item
-                    while (i--) {
-                        var key = 'verbose-' + namespaceList.join('.'),
-                            en = a.environment.get(key);
-
-                        if (!a.isNull(en)) {
-                            found = true;
-                            shouldPrint = (en < priority) ? false : true;
-                            break;
-                        }
-
-                        // We don't find any, we go one level up
-                        namespaceList.pop();
-                    }
-                }
-
-                // Check the verbose state to know if message should be printed
-                var environmentPriority = a.environment.get('verbose');
-                if (!found && !a.isNull(environmentPriority) && !a.isNull(priority) && parseInt(environmentPriority, 10) < priority) {
-                    shouldPrint = false;
-                }
-
-                if (shouldPrint) {
-                    window.console[level](message);
-                }
-                break;
-            }
+            printToConsole(message, level, priority);
         }
 
         // If data exceed limit, we remove some
@@ -118,6 +164,7 @@ a.console = (function() {
             logData[level].shift();
         }
     }
+
 
     return {
         /**
