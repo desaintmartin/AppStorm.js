@@ -74,14 +74,41 @@ a.console = (function() {
     }
 
     /**
-     * @return The verbosity defined by environment. If not defined, return 0.
+     * Takes a log message, analyze its namespace if any:
+     * If message looks like "foo.bar.baz: some message to output":
+     * Look for a specific "verbose" option in current namespace
+     * (foo.bar.baz) then, if not found, look upward (foo.bar, foo).
+     * Finally, if no found, check "root" namespace, i.e environment
+     *
+     * @method checkNamespaceVerbosePriority
+     * @private
+     *
+     * @param message {Mixed} The message to output
+     *
+     * @return The nearest "verbose" option in the namespace
     */
-    function getEnvironmentVerbosity() {
+    function getNamespaceVerbosePriority(message) {
+        // We should raise if message is not a string.
+        if(a.isString(message) && message.indexOf(":") >= 0) {
+            var name = message.substr(0, message.indexOf(":")),
+                namespaceList = name.split(".");
+
+            while(namespaceList.length > 0) {
+                var namespacePriority = a.environment.get("verbose-" + namespaceList.join("."));
+
+                if(!a.isNull(namespacePriority)) {
+                    return namespacePriority;
+                }
+
+                // We don't find any, we go one level up
+                namespaceList.pop();
+            }
+        }
+        // Not found in namespace? Check root
         var environmentPriority = a.environment.get('verbose');
         if (!a.isNull(environmentPriority)) {
             return parseInt(environmentPriority, 10);
         }
-        return 0;
     }
 
     /**
@@ -100,38 +127,21 @@ a.console = (function() {
      *
     */
     function printToConsole(message, level, priority) {
-        var shouldPrint = isToBeLogged(level),
-            found = false;
-
-        // We search for fine verbose element
-        if (a.isString(message) && message.indexOf(':') >= 0) {
-            var name = message.substr(0, message.indexOf(':')),
-                namespaceList = name.split('.'),
-                i = namespaceList.length;
-
-            // We go from full array recomposed, to only first item
-            while (i--) {
-                var key = 'verbose-' + namespaceList.join('.'),
-                    en = a.environment.get(key);
-
-                if (!a.isNull(en)) {
-                    found = true;
-                    shouldPrint = (en < priority) ? false : true;
-                    break;
-                }
-
-                // We don't find any, we go one level up
-                namespaceList.pop();
-            }
+        // Bug: IE does not support testing variable existence if they are not
+        // scopped with the root (here window)
+        if (!(!a.isNull(window.console) && a.isFunction(window.console.log))) {
+            return;
+        }
+        if (!isToBeLogged(level)) {
+            return;
         }
 
-        if (!found && !a.isNull(priority) && priority < getEnvironmentVerbosity()) {
-            shouldPrint = false;
+        var namespaceVerbosePriority = getNamespaceVerbosePriority(message);
+        if (!a.isNull(priority) && namespaceVerbosePriority && priority < namespaceVerbosePriority) {
+            return;
         }
 
-        if (shouldPrint) {
-            window.console[level](message);
-        }
+        window.console[level](message);
     }
 
     /**
@@ -154,8 +164,7 @@ a.console = (function() {
         }
         logData[level].push(message);
 
-        // Bug: IE does not support testing variable existence if they are not scopped with the root (here window)
-        if (!a.isNull(window.console) && a.isFunction(window.console.log) && appear !== false) {
+        if (appear !== false) {
             printToConsole(message, level, priority);
         }
 
